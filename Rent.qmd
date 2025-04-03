@@ -1,0 +1,878 @@
+---
+title: "House Rent Prediction"
+author: "Swastika Timilsina"
+format: html
+editor: visual
+---`
+---
+
+# Abstract
+
+This study analyzes the Indian rental market, identifying key factors influencing rental prices. Higher rents correlate with larger property sizes, more bedrooms, and furnished status, with Mumbai having the highest average rents. Properties rented through agents and those without tenant conditions also command higher rents. Using linear regression and support vector regression models, the analysis shows strong predictive accuracy, highlighting BHK, size, city, furnishing status, and total floors as crucial factors. Despite the models' effectiveness, additional factors may influence rental prices, offering valuable insights for renters, property owners, and policymakers.
+
+# Introduction
+
+India's housing options are very diverse, ranging from grand palaces to modern high-rise apartments and simple village huts. This diversity reflects the growth in India's housing sector as income levels have risen. Despite this progress, India only achieves 60.9% of its potential in providing basic housing rights, according to the Human Rights Measurement Initiative.
+
+Renting, also known as hiring or letting, is an agreement where people pay to use someone else's property temporarily. In a gross lease, the tenant pays a fixed rent while the landlord covers property expenses. Renting fits into the sharing economy, promoting efficient use of resources and making housing accessible to more people.
+
+The **"House Rent Prediction"** data set contains rental information for properties,encompassing houses, apartments and flats, in the major Indian cities **(Kolkata, Mumbai, Bangalore, Delhi, Chennai, and Hyderabad)**. The data set covers more than 4700 properties with details like BHK, rent, size, floors, area type, city, furnishing, tenant preferences, bathrooms, and contact information.
+
+{{<pagebreak>}}
+
+## Structure of the Dataset
+
+-   **Posted On:** Date the rental listing was posted.
+-   **BHK:** Number of Bedrooms, Hall, Kitchen.
+-   **Rent:** Rent of the Houses/Apartments/Flats.
+-   **Size:** Size of the Houses/Apartments/Flats in Square Feet.
+-   **Floor:** Houses/Apartments/Flats situated in which Floor and Total Number of Floors (Example: Ground out of 2, 3 out of 5, etc.)
+-   **Area Type:** Size of the Houses/Apartments/Flats calculated on either Super Area or Carpet Area or Build Area.
+-   **Area Locality:** Locality of the Houses/Apartments/Flats.
+-   **City:** City where the Houses/Apartments/Flats are Located.
+-   **Furnishing Status:** Furnishing Status of the Houses/Apartments/Flats, either it is Furnished or Semi-Furnished or Unfurnished.
+-   **Tenant Preferred:** Type of Tenant Preferred by the Owner or Agent.
+-   **Bathroom:** Number of Bathrooms.
+-   **Point of Contact:** Whom should you contact for more information regarding the Houses/Apartments/Flats.
+
+## Objectives
+
+The goal of analyzing this data set is to provide valuable insights into the rental market, assisting renters, property owners, agents, urban planners, and policymakers. The analysis aims to:
+
+-   Determine the factors influencing rent and create models to forecast rental prices.
+
+-   Identify preferred property features and locations for different tenant groups (bachelors, families).
+
+-   Offer detailed analysis of rental trends in specific localities and compare across cities.
+
+{{<pagebreak>}}
+
+## Approach Strategy
+
+-   Exploring each feature thoroughly.
+-   Assessing the correlation of each feature with the target variable.
+-   Performing scaling, imputation, and outlier removal as needed.
+-   Handling categorical features appropriately.
+-   Identifying patterns and relationships within the data.
+-   Conducting feature selection to enhance model performance.
+-   Evaluating various models to determine the optimal choice.
+
+## Libraies Used
+
+```{r}
+#| echo: false
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE,message = FALSE)
+```
+
+```{r, echo=TRUE, results='hide'}
+library(DT)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(gridExtra)
+library(knitr)
+library(stringr)
+library(lubridate)
+library(plotly)
+library(reshape2)
+library(kableExtra)
+library(scales)
+library(broom)
+library(ggpubr)
+library(e1071)
+library(Metrics)
+
+
+```
+
+{{<pagebreak>}}
+
+```{r}
+df = read.csv("House_Rent_Dataset.csv")
+```
+
+# Data Cleaning
+
+### Step 1
+
+We assumed that lower floors are generally cheaper than upper floors. To investigate this, we first separate the "Current Floor" and "Total Floors" from the dataset. We then convert these columns from object data types to numerical values, which involves transforming the data into a format suitable for analysis. This conversion is crucial for accurately assessing the relationship between floor level and rental prices. Once prepared, the data will be ready for further analysis to determine how floor level influences rental costs.
+
+```{r}
+lf = data.frame(Floor = c("2 out of 10","Ground out of 4","Upper Basement out of 3","Lower Basement out of 7","1 out of 1"))
+
+Current_floor_pattern = "^(Ground|Upper Basement|Lower Basement|\\d+)"
+Total_floors_pattern = "out of\\s*(\\d+)"
+
+df = df %>%
+  mutate(Current_Floor = str_match(Floor,Current_floor_pattern)[,1],
+         Total_Floors = str_match(Floor,Total_floors_pattern)[,2]) %>%
+  mutate(Current_Floor= case_when(
+    Current_Floor=="Ground"~0,
+    Current_Floor=="Upper Basement"~-0.5,
+    Current_Floor=="Lower Basement"~-1,
+    TRUE ~ as.numeric(Current_Floor)
+  ),
+   Total_Floors= as.numeric(Total_Floors)
+) %>%
+  select(-Floor)
+```
+
+### Step 2
+
+The data provided is from the year 2022. To analyze the monthly rent patterns, we will extract the month from the 'Posted ON' column. By doing this, we can group the data by month and examine how the rent prices fluctuate over the course of the year. This will allow us to identify any seasonal trends or patterns in rent changes, providing insights into how rent prices vary from month to month in 2022. This analysis will be useful for understanding the dynamics of the rental market throughout the year.
+
+```{r}
+df = df %>%
+  mutate(Month = month(ymd(Posted.On))) %>%
+  select(-Posted.On)
+
+```
+
+### Step 3
+
+Let's check the number of missing data from each columns.
+
+```{r}
+mq = colSums(is.na(df))
+
+kable(mq, format = "html", table.attr = "class='table table-bordered'") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                full_width = F, 
+                position = "center") %>%
+  add_header_above(c("NA Counts" = ncol(mq))) %>%
+  column_spec(1, border_left = TRUE, border_right = TRUE) %>%
+  column_spec(2, border_left = TRUE, border_right = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "lightgray")
+```
+
+The table indicates that the 'Total Floors' variable has 4 missing values (NA). Given the large size of the data set, it is feasible to remove rows with missing values in this column without significantly impacting the overall analysis. This approach simplifies the data set and ensures that subsequent analyses are not affected by missing data.
+
+```{r}
+df = na.omit(df)
+```
+
+### Step 4
+
+Let's determine which columns in our data set are categorical. These are typically features that represent categories or groups, such as city names, area types, or tenant preferences. By understanding the number of unique values for each categorical feature, you can gain insights into the complexity and potential variability in your data, which is crucial for further analysis and modeling.
+
+```{r}
+yr = df %>%
+  select(where(is.character))%>%
+  summarise(across(everything(),n_distinct))
+kable(yr, format = "html", table.attr = "class='table table-bordered'") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                full_width = F, 
+                position = "center") %>%
+  add_header_above(c("Distinct Counts" = ncol(yr))) %>%
+  column_spec(1:ncol(yr), border_left = TRUE, border_right = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "lightgray")
+```
+
+Out of 4742 co we have 2233 which is near about 50% so I don't think Area Type column will contribute much to our model due to High Cardinality but anyways we will get feature importance through various techniques later on.
+
+### Step 5
+
+To understand the distribution of rental properties across different cities, we will first tally the number of available rental properties in each city. By aggregating this data, we can compare the number of properties in each city and identify which cities have the highest and lowest availability. This comparison will provide insights into the rental market landscape, highlighting cities with abundant rental options and those with fewer available properties.
+
+```{r}
+tb = df %>%
+  group_by(City) %>%
+  summarise(count = n())
+
+kable(tb, format = "html", table.attr = "class='table table-bordered'") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                full_width = F, 
+                position = "center") %>%
+  add_header_above(c("City Summary" = ncol(tb))) %>%
+  column_spec(1, border_left = TRUE, border_right = TRUE) %>%
+  column_spec(2, border_left = TRUE, border_right = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "lightgray")
+```
+
+From the table, we can observe the distribution of rental properties across various cities in India. It is evident that Mumbai has the highest number of rental properties available, indicating a larger rental market in this city. Conversely, Kolkata has the lowest number of rental properties available in the dataset. This comparison highlights the disparity in rental property availability between these major cities, providing insight into the rental market dynamics across different regions.
+
+{{<pagebreak>}}
+
+# Exploratory Data Analysis
+
+## Mean, Median, Maximum & Minimum House Rents
+
+```{r}
+mean_rent = round(mean(df$Rent))
+median_rent = round(median(df$Rent))
+max_rent = round(max(df$Rent))
+min_rent = round(min(df$Rent))
+
+# Create a data frame for the statistics
+rent_stats = data.frame(
+  Statistic = c("Mean House Rent", "Median House Rent", "Highest House Rent", "Lowest House Rent"),
+  Value = c(mean_rent, median_rent, max_rent, min_rent)
+)
+
+# Display the table
+  kable(rent_stats, caption = "House Rent Statistics") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+```
+
+### Observation
+
+The dataset reveals significant insights into the rental market. The mean house rent is 35,009, indicating the average rental price across all properties. The median house rent is 16,000, suggesting that half of the properties have rents below this value, highlighting the presence of more affordable rental options. The highest house rent in the dataset is a substantial 3,500,000, reflecting the availability of extremely high-end properties, while the lowest rent is 1,200, demonstrating the wide range of rental prices and housing options available in the market.
+
+## Top 5 Highest House Rents present in the Dataset
+
+```{r}
+top_rents <- df %>%
+  arrange(desc(Rent)) %>%
+  select(City, Rent) %>%
+  head(5)
+
+# Render the table using DT
+kable(top_rents, 
+      format = "html", 
+      table.attr = "style='width:100%;'", 
+      row.names = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE,
+                position = "left") %>%
+  column_spec(1, border_right = TRUE) %>%
+  column_spec(2, border_left = TRUE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "black")
+```
+
+{{<pagebreak>}}
+
+### Observation
+
+The top five highest rents in the dataset reveal striking patterns in the rental market. The highest rent, 3,500,000, is found in Bangalore, reflecting the city's growing appeal for luxury properties due to its booming tech industry and affluent residents. Mumbai follows with substantial rents, including 1,200,000, 1,000,000, 850,000, and 700,000. This concentration of high rents in Mumbai highlights its status as a major financial and entertainment hub, where premium real estate commands exceptionally high prices. The consistent presence of high rental values in both Bangalore and Mumbai underscores the significant demand for upscale properties in these major metropolitan areas, driven by their economic opportunities and high standards of living.
+
+## Top 5 Lowest House Rents present in the Dataset
+
+```{r}
+lowest_rents <- df %>%
+  arrange(Rent) %>%
+  select(City, Rent) %>%
+  head(5)
+
+kable(lowest_rents, 
+      format = "html", 
+      table.attr = "style='width:100%;'", 
+      row.names = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE,
+                position = "left") %>%
+  column_spec(1, border_right = TRUE) %>%
+  column_spec(2, border_left = TRUE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "black")
+```
+
+### Observation
+
+The dataset reveals the five lowest rents, highlighting affordable housing options in major Indian cities. The lowest rent, 1,200, is in Hyderabad, reflecting its relatively lower rental prices compared to other metropolitan areas. Following this, Kolkata has three properties with rents of 1,500, 1,800, and 2,200, indicating that while it offers some low-rent options, it is still more affordable than cities like Mumbai or Bangalore. The presence of multiple low rents in Kolkata suggests it provides a range of budget-friendly housing options. Delhi, with a rent of 2,000, also offers affordable housing but at a higher price point than Kolkata. This pattern underscores the variability in rental prices across different cities, with Hyderabad and Kolkata standing out for their lower rental costs.
+
+{{<pagebreak>}}
+
+## Analysis of Rent Based on Various Attributes
+
+### Area Type
+
+```{r}
+ggplot(df, aes(x = reorder(Area.Type, Rent), y = Rent, fill = Area.Type)) +
+  geom_boxplot(outlier.color = "black", outlier.shape = 1) +
+  geom_point(aes(colour = Area.Type)) +
+  scale_y_continuous(labels = scales::label_number(scale = 1e-6, suffix = "M"), 
+                     breaks = seq(0, max(df$Rent, na.rm = TRUE), by = 0.5e6)) +
+  theme_classic() +
+  labs(title = "Box Plot of Area Type",x = "Area Type" ,y = "Rent (in Millions)")
+
+```
+
+#### Observation
+
+From the box plot, we observe that the rent based on carpet area is significantly higher compared to other types of rents. This suggests that properties are valued more highly based on the actual usable space within them. In contrast, rent based on the super area, which includes additional common areas, tends to be comparatively lower. The rent based on built area, which includes walls and structural components, is the lowest. This indicates that the built area is less influential in determining rental prices compared to the usable carpet area. Overall, the box plot illustrates the varying impact of different area measurements on rental prices.
+
+{{<pagebreak>}}
+
+## Furnishing Status
+
+```{r}
+ggplot(df, aes(x = reorder(Furnishing.Status, Rent), y = Rent, fill = Furnishing.Status)) +
+  geom_boxplot(outlier.color = "black", outlier.shape = 1) +
+  geom_point(aes(colour = Furnishing.Status)) +
+  scale_y_continuous(labels = scales::label_number(scale = 1e-6, suffix = "M"),
+                     breaks = seq(0, max(df$Rent, na.rm = TRUE), by = 0.5e6)) +
+  theme_classic() +
+  labs(title = "Box Plot of Furnishing Status",x = "Furnishing Status" ,y = "Rent (in Millions)")
+```
+
+#### Observation
+
+From the box plot, it can be observed that unfurnished houses for rent tend to have lower rents compared to furnished or semi-furnished houses. The box plot illustrates that the median rent for unfurnished properties is generally lower, and the range of rents is also narrower. This visual representation confirms that, on average, unfurnished houses are less expensive than those that are furnished or semi-furnished.
+
+{{<pagebreak>}}
+
+## Tenant Preferred
+
+```{r}
+ggplot(df, aes(x = reorder(Tenant.Preferred, Rent), y = Rent, fill = Tenant.Preferred)) +
+  geom_boxplot(outlier.color = "black", outlier.shape = 1) +
+  geom_point(aes(colour = Tenant.Preferred)) +
+  scale_y_continuous(labels = scales::label_number(scale = 1e-6, suffix = "M"),
+                     breaks = seq(0, max(df$Rent, na.rm = TRUE), by = 0.5e6)) +
+  theme_classic() +
+  labs(title = "Box Plot of Tenant Preferred",x = "Tenant Preferred", y = "Rent (in Millions)")
+
+```
+
+#### Observation
+
+From the box plot, it can be observed that houses rented with no tenant conditions tend to have slightly higher rents compared to those with specific tenant preferences. The plot indicates that the median rent for properties with no tenant conditions is generally higher, and the range of rents may also be broader. This suggests that, on average, rental properties without tenant conditions command a higher price than those with specified preferences.
+
+{{<pagebreak>}}
+
+## Point of Contact
+
+```{r}
+ggplot(df, aes(x = reorder(Point.of.Contact, Rent), y = Rent, fill = Point.of.Contact)) +
+  geom_boxplot(outlier.color = "black", outlier.shape = 1) +
+  geom_point(aes(colour = Point.of.Contact)) +
+  scale_y_continuous(labels = scales::label_number(scale = 1e-6, suffix = "M"),
+                     breaks = seq(0, max(df$Rent, na.rm = TRUE), by = 0.5e6)) +
+  theme_classic() +
+  labs(title = "Box Plot of Point of Contact",x = "Point of Contact", y = "Rent (in Millions)")
+
+```
+
+### Observation
+
+From the box plot, we observe that properties rented through contact agents tend to have higher rents compared to those rented directly from builders. This higher rent likely reflects additional costs associated with the agent's services. On the other hand, renting directly from builders generally results in lower rents, suggesting that bypassing intermediary services can reduce rental expenses. This observation highlights the cost implications of using an agent versus renting directly.
+
+{{<pagebreak>}}
+
+## City
+
+```{r}
+ggplot(df, aes(x = reorder(City, Rent), y = Rent, fill = City)) +
+  geom_boxplot(outlier.color = "black", outlier.shape = 1) +
+  geom_point(aes(colour = City)) +
+  scale_y_continuous(labels = scales::label_number(scale = 1e-6, suffix = "M"),
+                     breaks = seq(0, max(df$Rent, na.rm = TRUE), by = 0.5e6)) +
+  theme_classic() +
+  labs(title = "Box Plot of Cities",x = "Cities", y = "Rent (in Millions)")
+```
+
+### Observation
+
+Observations reveal that Mumbai experiences high rents due to its high demand for housing, driven by a significant influx of job seekers and corporate relocations. This demand elevates rental prices in the city. In contrast, other cities, with the exception of Kolkata, show relatively uniform rent levels, suggesting a more balanced demand across these locations. Kolkata stands out with notably lower rents, which can be attributed to its less developed job sectors and lifestyle, resulting in a lower demand for rental properties compared to cities like Mumbai.
+
+{{<pagebreak>}}
+
+# Visualization of Mean Rent Based on Attributes
+
+## Mean Rent of Different Cites
+
+```{r}
+cf <- df %>%
+  group_by(City) %>%
+  summarise(rent = mean(Rent, na.rm = TRUE)) %>%
+  arrange(desc(rent))
+
+ggplot(cf, aes(x = City, y = rent, fill = City)) +
+  geom_bar(stat = "identity", color = "black") + # Added border color
+  geom_text(aes(label = label_number(scale = 1, suffix = "k", big.mark = ",")(rent / 1000)), 
+            vjust = -0.3, color = "black", size = 3.5) + # Added data labels
+  scale_fill_manual(values = c("red", "yellow", "darkgreen", "darkblue", "orange", "purple")) +
+  scale_y_continuous(labels = label_number(scale = 1/1000, suffix = "k", big.mark = ",")) + # Format y-axis labels in thousands
+  labs(
+    x = "Cities",
+    y = "Average Rent",
+    title = "Average Rent by City"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"), # Centered and bold title
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold")
+  )
+```
+
+### Observation
+
+From the bar graph showing average rent by city, it is evident that houses in Mumbai command significantly higher prices compared to other cities. This high rent can be attributed to several factors, such as a strong demand driven by job seekers and corporate relocations. The bar graph clearly illustrates that Mumbai's average rent surpasses that of other cities, reinforcing the observation that the city's rental market is notably more expensive.
+
+{{<pagebreak>}}
+
+## Average rent by BHK
+
+```{r}
+of <- df %>%
+  group_by(BHK) %>%
+  summarise(rent = mean(Rent, na.rm = TRUE))
+
+ggplot(of, aes(x = factor(BHK), y = rent, fill = factor(BHK))) +
+  geom_bar(stat = "identity", color = "black") + # Added border color
+  geom_text(aes(label = label_number(scale = 1, suffix = "k", big.mark = ",")(rent / 1000)), 
+            vjust = -0.3, color = "black", size = 3.5) + # Added data labels
+  scale_fill_manual(values = c("red", "yellow", "darkgreen", "darkblue", "orange", "purple")) +
+  scale_y_continuous(labels = label_number(scale = 1/1000, suffix = "k", big.mark = ",")) + # Format y-axis labels in thousands
+  labs(
+    x = "BHK",
+    y = "Average Rent",
+    title = "Average Rent by BHK"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"), # Centered and bold title
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold")
+  )
+
+```
+
+### Observation
+
+From the bar plot showing average rent by BHK (bedrooms), it is observed that rent prices generally increase with the number of bedrooms. This trend reflects that larger properties, with more bedrooms, command higher rents due to their greater space and additional amenities. However, 6 BHK properties appear to have lower average rental prices, which can be attributed to their lower demand in the market. This suggests that while larger properties typically cost more, the demand for extremely large units like 6 BHKs is comparatively lower, resulting in reduced rental prices.
+
+{{<pagebreak>}}
+
+## Furnishing Status
+
+```{r}
+pf = df %>%
+  group_by(Furnishing.Status)%>%
+  summarise(rent = mean(Rent))%>%
+  arrange(desc(rent))
+
+ggplot(pf, aes(x = Furnishing.Status, y = rent, fill = Furnishing.Status)) +
+  geom_bar(stat = "identity", color = "black") + # Added black border around the bars
+  geom_text(aes(label = scales::label_number(scale = 1, suffix = "k", big.mark = ",")(rent / 1000)), 
+            vjust = -0.3, color = "black", size = 3.5) + # Added data labels
+  scale_fill_manual(values = c("red", "yellow", "darkgreen")) +
+  scale_y_continuous(labels = scales::label_number(scale = 1/1000, suffix = "k", big.mark = ",")) + # Format y-axis labels in thousands
+  labs(
+    x = "Furnishing Status",
+    y = "Average Rent",
+    title = "Average Rent by Furnishing Status"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"), # Centered and bold title
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10, face = "bold"), # Adjusted x-axis text
+    axis.text.y = element_text(size = 10, face = "bold"), # Adjusted y-axis text
+    legend.position = "none" # Remove legend if not needed
+  )
+
+
+```
+
+### Observation
+
+From the bar plot showing average rent by furnishing status, it is clear that furnished properties command higher average rents. This is likely due to the added convenience and value of move-in-ready amenities that furnished homes provide. Semi-furnished properties have moderate rents, reflecting a balance between having some furniture and the flexibility for tenants to add their own. Unfurnished properties, on the other hand, typically have the lowest average rents, as they come without any furniture or appliances, which results in reduced rental costs. This observation highlights the influence of furnishing status on rental prices, with furnished homes generally being more expensive.
+
+{{<pagebreak>}}
+
+## Let's convert the categorial data into numerical for further analysis
+
+In our dataset, the categorical variables **Area.Type**, **Area.Locality**, **City**, **Furnishing.Status**, **Tenant.Preferred**, and **Point.of.Contact** need to be converted into numerical form for the linear regression model to process them effectively. Properly encoding these categorical variables ensures that the model can interpret them correctly, potentially improving its predictive power.
+
+# Correlation
+
+Correlation is a statistical measure that helps identify relationships between variables in a dataset. In the context of the provided dataset, correlation can reveal how different factors, such as Rent, Size, Furnishing Status, and Number of Bathrooms, influence each other. For example, we can determine if larger properties generally command higher rents or if furnished properties are more expensive than unfurnished ones. By converting categorical variables to numerical values and calculating the correlation matrix, we can uncover these relationships. Understanding these correlations allows for more informed decision-making regarding rental prices and property features, benefiting both renters and landlords.
+
+```{r}
+dt = df %>%
+  mutate(Area.Type= as.numeric(factor(Area.Type)))%>%
+  mutate(Area.Locality= as.numeric(factor(Area.Locality)))%>%
+  mutate(City= as.numeric(factor(City)))%>%
+  mutate(Furnishing.Status= as.numeric(factor(Furnishing.Status)))%>%
+  mutate(Tenant.Preferred= as.numeric(factor(Tenant.Preferred)))%>%
+  mutate(Point.of.Contact= as.numeric(factor(Point.of.Contact)))
+
+```
+
+{{<pagebreak>}}
+
+## Correlation Matrix
+
+```{r}
+cor.matrix = cor(dt)
+cor_melt = melt(cor.matrix)
+
+fig <- plot_ly(
+  x = colnames(cor.matrix),
+  y = rownames(cor.matrix),
+  z = cor.matrix,
+  type = "heatmap",
+  colors = colorRamp(c("white", "blue"))
+)
+
+# Customize the layout
+fig <- fig %>% layout(
+  title = "<b>Correlation Matrix</b>",
+  xaxis = list(title = ""),
+  yaxis = list(title = ""),
+  template = "plotly_dark"
+)
+
+# Add text annotations for the correlation values
+fig <- fig %>% add_annotations(
+  x = rep(colnames(cor.matrix), each = nrow(cor.matrix)),
+  y = rep(rownames(cor.matrix), times = ncol(cor.matrix)),
+  text = sprintf("%.2f", as.vector(cor.matrix)),
+  showarrow = FALSE,
+  font = list(color = "black")
+)
+
+# Display the plot
+fig
+```
+
+{{<pagebreak>}}
+
+## Observation
+
+### Highest Correlations:
+
+-   **BHK and Size:** The highest positive correlation is 1.00,indicating a perfect linear relationship. This means that as the number of bedrooms (BHK) increases, the size of the property also increases, which is expected.
+
+-   **Size and Rent:** Another high positive correlation is 0.72. This indicates that larger properties tend to have higher rent.
+
+-   **BHK and Rent:** The correlation between BHK and Rent is 0.37, suggesting that properties with more bedrooms tend to have higher rent, though this relationship is not as strong as that between Size and Rent.
+
+-   **Bathroom and Size:** The correlation is 0.44,indicating that properties with more bathrooms tend to be larger in size.
+
+### Lowest Correlations:
+
+-   **Point.of.Contact and Tenant.Preferred**: The lowest correlation is −0.36-0.36−0.36. This negative correlation suggests that certain points of contact might be less preferred by tenants.
+
+-   **Total_Floors and Point.of.Contact**: The correlation is −0.47-0.47−0.47, indicating that the number of total floors in a building might negatively correlate with the type of point of contact.
+
+-   **Current_Floor and Tenant.Preferred**: The correlation is −0.19-0.19−0.19, suggesting that the preference of tenants might slightly decrease as the current floor increases.
+
+-   **Bathroom and Point.of.Contact**: The correlation is −0.36-0.36−0.36, indicating a negative relationship between the number of bathrooms and the point of contact.
+
+{{<pagebreak>}}
+
+# Distributions
+
+## Rent
+
+```{r}
+library(plotly)
+hist_fig <- plot_ly(dt, x = ~Rent, type = 'histogram', 
+                    marker = list(color = 'rgb(0, 0, 139)')) %>%
+  layout(title = 'Rent Prices Distribution Histogram',
+         xaxis = list(title = 'Rent'),
+         yaxis = list(title = 'Count'))
+
+hist_fig
+
+```
+
+### Observation
+
+The rent data is highly skewed, with most values below 0.25 million, suggesting that high-end properties are underrepresented. To address this skewness, consider applying a logarithmic transformation to the rent values, which can normalize the distribution and improve analysis.
+
+{{<pagebreak>}}
+
+## Log Transformation
+
+```{r}
+dx = dt %>%
+  mutate(Rent = log(Rent))
+```
+
+```{r}
+plot_ly(dx, x = ~Rent, type = 'histogram', 
+                    marker = list(color = 'rgb(0, 0, 139)')) %>%
+  layout(title = 'Log-Transformed Rent Prices Distribution Histogram',
+         xaxis = list(title = 'Log(Rent)'),
+         yaxis = list(title = 'Count'))
+```
+
+### Observation
+
+After applying the logarithmic transformation, your target variable still shows moderate skew with a value of 0.85, but it is significantly closer to a normal distribution than before. This is a positive outcome, as it suggests the transformation has improved the symmetry of the data distribution. A skewness value closer to 0 indicates a more normal distribution, which is beneficial for many statistical models and analyses.
+
+{{<pagebreak>}}
+
+## Size
+
+```{r}
+plot_ly(dx, x = ~Size, type = 'histogram', 
+                    marker = list(color = 'rgb(0, 0, 139)')) %>%
+  layout(title = 'Size Distribution',
+         xaxis = list(title = 'Size'),
+         yaxis = list(title = 'Count'))
+
+```
+
+### Observation
+
+The histogram of the Size variable reveals that most houses listed in the dataset have a moderate size, with the smallest house being about 10 square feet and the largest about 8000 square feet. The median size is around 850 square feet, indicating that while the central tendency of the dataset is moderate, there is considerable variability in property sizes. The dataset shows a skew towards more moderate-sized properties, with larger, more luxurious houses being rare or absent. This suggests that the dataset may not fully capture the range of property sizes, particularly missing higher-end listings. To gain a more comprehensive view of the property market, especially for larger properties, it may be necessary to explore additional data sources or adjust data collection methods.
+
+{{<pagebreak>}}
+
+# Hypothesis Testing
+
+Null Hypothesis (Ho) : The mean rental values of the properties are the same for area type of super area and carpet area.
+
+Alternative Hypothesis (H1) : There is a significant different of the mean rental value for properties at super area and carpet area.
+
+```{r}
+fil_df <- dt %>% filter(Area.Type != 'Built Area')
+superArea <- fil_df %>% filter(Area.Type == 'Super Area')
+carpetArea <- fil_df %>% filter(Area.Type == 'Carpet Area')
+
+# Visualization
+# Histogram
+histogram_plot <- ggplot(fil_df, aes(x = log(Rent), fill = Area.Type)) +
+  geom_histogram(position = 'dodge', bins = 30, alpha = 0.7, aes(group = Area.Type)) +
+  labs(title = 'Distribution of Rental Prices by Area Type',
+       x = 'Log of Rent', y = 'Count') +
+  theme_minimal()
+
+# Combine plots (only histogram in this case)
+grid.arrange(histogram_plot, ncol = 1)
+
+# Summary Statistics
+summary_stats <- fil_df %>%
+  group_by(Area.Type) %>%
+  summarise(
+    Count = n(),
+    Mean = mean(Rent, na.rm = TRUE),
+    SD = sd(Rent, na.rm = TRUE),
+    Min = min(Rent, na.rm = TRUE),
+    Median = median(Rent, na.rm = TRUE),
+    Max = max(Rent, na.rm = TRUE)
+  )
+print(summary_stats)
+
+# Perform ANOVA test
+anova_result <- aov(Rent ~ Area.Type, data = fil_df)
+anova_summary <- summary(anova_result)
+
+# Print ANOVA results
+print(anova_summary)
+
+# Interpret results
+alpha <- 0.05
+pvalue <- anova_summary[[1]][["Pr(>F)"]][1]
+
+if (pvalue < alpha) {
+  cat('\nThere is a significant difference in mean rental values for properties at Super Area and Carpet Area.\n')
+} else {
+  cat('The mean rental values are similar for the properties at Super Area and Carpet Area.\n')
+}
+
+```
+
+### Interpretation
+
+The ANOVA results reveal a very high F-statistic of 229.7 and an extremely low p-value of less than 2e-16. This indicates a significant difference in rental prices between properties measured by "Super Area" and "Carpet Area." The high F-statistic confirms that the difference in rental values is substantial, and the low p-value means this finding is statistically significant and not due to random chance. {{<pagebreak>}}
+
+# Modeling
+
+```{r}
+set.seed(24)
+trainset = createDataPartition(dx$Rent,p = 0.8,list = FALSE)
+traindata = dx[trainset,]
+testdata = dx[-trainset,]
+```
+
+## Linear Regression
+
+Linear Regression is a statistical method used for predicting a dependent variable based on one or more independent variables. It aims to minimize the sum of squared errors between the predicted and actual values, finding the best-fitting straight line through the data points.
+
+In this dataset, Linear Regression is employed to predict rent (the dependent variable) based on independent variables such as BHK, Size, Area Type, City, Furnishing Status, etc. Linear Regression is chosen due to its simplicity and interpretability, making it a widely used method for understanding the relationships between variables. Additionally, Linear Regression's assumption of linearity allows for straightforward estimation and inference, providing clear insights into how each independent variable impacts rental prices. Its efficiency and ease of implementation make it a reliable choice for predictive modeling when the relationships between variables are approximately linear.
+
+```{r}
+m_li = lm(Rent~.,data = traindata)
+summary(m_li)
+```
+
+### Observation
+
+The linear regression model for predicting rent includes several significant predictors: BHK, Size, City, Furnishing Status, Bathroom, Point of Contact, and Total Floors, all with p-values less than 0.001. These variables strongly influence rent, with factors like more BHKs and larger Size associated with higher rents, while a furnished status tends to lower rent. Less significant predictors include Area Locality and Tenant Preferred. The model explains 74.48% of the variance in rent (R-squared = 0.7448) and has a residual standard error of 0.4774. The overall F-statistic is 919.8, with a p-value less than 2.2e-16, indicating the model's statistical significance. This highlights key factors affecting rent while suggesting areas for further investigation to enhance predictive accuracy.
+
+## Diagnostic Plots
+
+```{r}
+reg_li = lm(Rent~BHK+Size+Area.Type+City+Furnishing.Status+Bathroom+Point.of.Contact+Total_Floors,data = traindata)
+par(mfrow = c(2, 2))
+plot(reg_li)
+```
+
+```{r}
+pre = predict(reg_li,testdata)
+actuals = testdata$Rent
+mse = mean((pre-actuals)^2)
+r2 = 1-(sum((pre-actuals)^2)/sum((actuals-mean(actuals))^2))
+```
+
+{{<pagebreak>}}
+
+### Diagnostic Plots Interpretation
+
+**Residuals vs Fitted:** Residuals are fairly randomly scattered around zero, suggesting no major issues with non-linearity or heteroscedasticity, but there are a few notable outliers.
+
+**Normal Q-Q:** Most residuals follow the normal distribution line, with some deviations at the ends, indicating slight non-normality in the residuals.
+
+**Scale-Location:** Residuals show a mostly consistent spread across fitted values, with a slight increase in spread at higher values, suggesting minor heteroscedasticity.
+
+**Residuals vs Leverage:** Identifies a few points with high leverage, particularly point 1838, which may be influential and warrant further investigation.
+
+### Conclusion
+
+The Fitted Regression Model predicts rent using BHK, Size, Area Type, City, Furnishing Status, Bathroom, Point of Contact, and Total Floors, was evaluated on testdata. The model demonstrates reasonable performance with a Mean Squared Error (MSE) of 0.2619319, indicating that the predictions are relatively close to the actual values in the test data. The R-squared (R²) value is 0.6840821, meaning the model explains approximately 68.41% of the variance in rent in the test data. This suggests the model has a good fit but also indicates that other factors not included in the model may influence rent. Overall, the model performs well on the test data but has room for further improvement.
+
+{{<pagebreak>}}
+
+## Support Vector Regression
+
+Support Vector Regression (SVR) is a type of Support Vector Machine (SVM) used for regression tasks. Unlike traditional linear regression, which aims to minimize the error between predicted and actual values, SVR attempts to fit the best line within a threshold margin of tolerance (epsilon).
+
+Support Vector Regression (SVR) is used in this dataset to predict rent (the dependent variable) based on independent variables such as BHK, Size, Area Type, City, Furnishing Status, etc. SVR is chosen due to its ability to handle non-linear relationships, making it suitable for capturing the complex patterns in rental prices. Additionally, SVR's robustness to outliers and its flexibility with kernel functions enhance its predictive accuracy and generalization, providing stable and reliable predictions even in the presence of extreme rent values. This makes SVR a valuable tool for modeling real estate rental prices effectively.
+
+```{r}
+X_train <- traindata[ , !(names(traindata) %in% "Rent")]
+y_train <- traindata$Rent
+X_test <- testdata[ , !(names(testdata) %in% "Rent")]
+y_test <- testdata$Rent
+
+# Fit the SVR model
+svr_model <- svm(X_train, y_train, type = "eps-regression")
+
+# Make predictions
+svr_prediction <- predict(svr_model, X_test)
+
+# Calculate evaluation metrics
+mae_svr <- mae(y_test, svr_prediction)
+mse_svr <- mse(y_test, svr_prediction)
+rmse_svr <- rmse(y_test, svr_prediction)
+
+# Print the evaluation metrics
+print(paste("MAE (SVR):", mae_svr))
+print(paste("MSE (SVR):", mse_svr))
+print(paste("RMSE (SVR):", rmse_svr))
+
+```
+
+### Observation
+
+The SVR model's performance metrics indicate a solid fit for predicting rent values. The Mean Absolute Error (MAE) of 0.3218 suggests that, on average, the model's predictions deviate by about 0.32 units from the actual rent values. The Mean Squared Error (MSE) of 0.2071 shows that the average squared deviation is 0.21 units, highlighting the model's effectiveness in reducing large errors. The Root Mean Squared Error (RMSE) of 0.4550 indicates that the typical deviation of predictions from actual values is about 0.46 units. Overall, these metrics reflect that the SVR model performs well in accurately predicting rent values, with relatively small prediction errors.
+
+{{<pagebreak>}}
+
+## Random Forest
+
+Random Forest is an ensemble learning method used for both classification and regression tasks. It builds multiple decision trees during training and outputs the average prediction (for regression) or majority vote (for classification) from all the trees. This approach enhances predictive accuracy and controls overfitting by aggregating the results from multiple trees, each trained on different subsets of the data.
+
+In this dataset, Random Forest is used to predict rent as the dependent variable. It is chosen for its ability to handle complex, non-linear relationships and interactions among features such as size, location, and furnishing status. Random Forest provides robust predictions by averaging results from multiple decision trees, reducing the risk of overfitting, and handling missing values effectively. Its capacity to assess feature importance also helps identify key factors influencing rental prices.
+
+```{r}
+rf_model <- randomForest(x = X_train, y = y_train, ntree = 100)
+
+# Make predictions
+rf_prediction <- predict(rf_model, X_test)
+
+# Calculate evaluation metrics
+mae_rf <- mae(y_test, rf_prediction)
+mse_rf <- mse(y_test, rf_prediction)
+rmse_rf <- rmse(y_test, rf_prediction)
+
+# Print the evaluation metrics
+print(paste("MAE (Random Forest):", mae_rf))
+print(paste("MSE (Random Forest):", mse_rf))
+print(paste("RMSE (Random Forest):", rmse_rf))
+
+```
+
+### Observation
+
+The Random Forest model shows strong performance with relatively low MAE, MSE, and RMSE values. The MAE suggests that, on average, the model's predictions are off by about 0.30 units of rent. The MSE and RMSE further confirm that the model effectively minimizes prediction errors, with typical deviations of approximately 0.18 and 0.42 units, respectively. These metrics indicate that the Random Forest model provides accurate and reliable predictions for rent values.
+
+{{<pagebreak>}}
+
+## Best Prediction Model
+
+Let's compare the performance metrics provided for each model: the linear regression, support vector regression (SVR), and random forest regression. Here are the metrics for each:
+
+### Linear Regression:
+
+-   **Residual Standard Error (RSE):** 0.4774
+
+-   **Multiple R-squared:** 0.7448
+
+-   **Adjusted R-squared:** 0.744
+
+-   **F-statistic:** 919.8 on 12 and 3782 DF, p-value: \< 2.2e-16
+
+### Support Vector Regression (SVR):
+
+-   **Mean Absolute Error (MAE):** 0.3218
+
+-   **Mean Squared Error (MSE):** 0.2071
+
+-   **Root Mean Squared Error (RMSE):** 0.4550
+
+### Random Forest Regression:
+
+-   **Mean Absolute Error (MAE):** 0.2950
+
+-   **Mean Squared Error (MSE):** 0.1745
+
+-   **Root Mean Squared Error (RMSE):** 0.4178
+
+### Interpretation:
+
+-   **MAE** measures the average magnitude of errors in a set of predictions, without considering their direction. The lower the MAE, the better the model's performance.
+
+-   **MSE** measures the average of the squares of the errors. It gives higher weight to larger errors, so it's useful for identifying models that make large errors. The lower the MSE, the better the model's performance.
+
+-   **RMSE** is the square root of MSE, which brings the error back to the original unit of measurement, making it more interpretable. The lower the RMSE, the better the model's performance.
+
+{{<pagebreak>}}
+
+#### Comparing Metrics:
+
+-   **MAE:**
+
+    -   SVR: 0.3218
+
+    -   Random Forest: 0.2950
+
+    Random Forest has a lower MAE, indicating it performs better on average.
+
+-   **MSE:**
+
+    -   SVR: 0.2071
+
+    -   Random Forest: 0.1745
+
+    Random Forest has a lower MSE, indicating it performs better overall, especially in reducing larger errors.
+
+-   **RMSE:**
+
+    -   SVR: 0.4550
+
+    -   Random Forest: 0.4178
+
+    Random Forest has a lower RMSE, indicating it performs better in terms of overall error magnitude.
+
+### Conclusion:
+
+Based on the MAE, MSE, and RMSE, **the Random Forest model** is the best performing model among the ones compared here. It has the lowest values for all these metrics, indicating better predictive performance and lower error rates compared to the Support Vector Regression (SVR) model and the linear regression model.
+
+{{<pagebreak>}}
+
+# Conclusion of The Report
+
+The analysis of the Indian rental market dataset reveals several key insights. Higher rents are closely associated with larger property sizes, more bedrooms (BHK), and furnished status. Mumbai stands out with the highest average rents, reflecting its high demand driven by economic opportunities, while Kolkata offers more affordable options. Properties rented through agents command higher rents compared to those rented directly from builders, and properties with no tenant conditions are more expensive. The dataset also highlights significant variability in rental prices, from very affordable to extremely high-end properties. Statistical models, including linear regression and support vector regression, demonstrate good predictive power, identifying BHK, size, city, furnishing status, and total floors as critical factors influencing rent. Despite achieving reasonable accuracy, the models indicate room for improvement, suggesting other variables might also impact rental prices. Overall, this analysis provides valuable insights for renters, property owners, and policymakers, helping to understand and navigate the rental market better.
